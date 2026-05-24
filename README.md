@@ -294,7 +294,7 @@ screenshots/architecture.png
 
 Add:
 ```text
-screenshots/workflow-execution.png
+screenshots/execution_success.png
 ```
 
 ---
@@ -303,7 +303,7 @@ screenshots/workflow-execution.png
 
 Add:
 ```text
-screenshots/generated-output.png
+screenshots/output.pdf
 ```
 
 ---
