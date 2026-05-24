@@ -1,0 +1,472 @@
+{
+  "name": "Resume Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Tailor My Resume",
+        "formDescription": "Paste a job description below.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "job_description",
+              "fieldType": "textarea",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "company_name"
+            },
+            {
+              "fieldLabel": "role_title"
+            },
+            {
+              "fieldLabel": " resume_pdf",
+              "fieldType": "file",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.5,
+      "position": [
+        -1776,
+        0
+      ],
+      "id": "d33d8f61-e6d3-4aa7-8e97-31ff87a1b36b",
+      "name": "On form submission",
+      "webhookId": "f9bd6186-f71e-4b26-b027-21a135e3d595"
+    },
+    {
+      "parameters": {
+        "jsCode": "let latex = $input.first().json.output;\n   latex = latex.replace(/^```(?:latex|tex)?\\s*/i, '').replace(/```\\s*$/, '').trim();\n   if (!latex.startsWith('\\\\documentclass')) {\n     throw new Error('LaTeX output malformed');\n   }\n   return [{ json: { latex } }];\n\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -48,
+        48
+      ],
+      "id": "8d308398-5f09-476c-bec0-c49f43bc7989",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://latex.ytotech.com/builds/sync",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "\n{\n  \"compiler\": \"pdflatex\",\n  \"resources\": [\n    { \"main\": true, \"content\": \"<your latex here>\" }\n  ]\n}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"compiler\": \"pdflatex\",\n  \"resources\": [\n    {\n      \"main\": true,\n      \"content\": {{ JSON.stringify($json.latex) }}\n    }\n  ]\n}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        176,
+        48
+      ],
+      "id": "a6fb8551-e87a-4cdb-bf12-7b6e885f6f75",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "_resume_pdf",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        -1552,
+        0
+      ],
+      "id": "1358a54c-6b41-4032-8691-cbdd23c2e9f0",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Resume (raw text extracted from PDF):\n\"\"\"\n{{ $('Extract from File').item.json.text }}\n\"\"\"\n\nJob Description:\n\"\"\"\n{{ $('On form submission').item.json.job_description }}\n\"\"\"\n\n{{ $json.feedback ? `\nRETRY MODE:\nPrevious ATS score: ${$json.previousScore}/100\n\nFix these issues:\n- ${$json.feedback}\n\nMissing JD keywords to include ONLY if truthfully supported by resume:\n${$json.missingKeywords}\n` : '' }}\n\nTailor the resume to this job description.\nInclude only fields and sections that exist in the source resume.\nDo not invent portfolio, GitHub, summary, certifications, skills, companies, dates, or metrics.\nReturn ONLY the tailored JSON.",
+        "options": {
+          "systemMessage": "You are a resume-tailoring engine. You receive a candidate's resume (raw text\nfrom PDF) and a job description. You return a tailored version as JSON.\n\n== HARD RULES ==\n1. NEVER invent skills, employers, titles, dates, degrees, metrics, achievements,\n   activities, certifications, projects, or any content not present in the source resume.\n2. Only reorder, rephrase, or omit content from the provided resume.\n3. Keep all numeric metrics (%, $, counts) EXACTLY as written.\n4. Do not rename employers, titles, or degrees.\n5. Output ONLY valid JSON. No prose, no markdown, no code fences.\n\n== SECTION MIRRORING (CRITICAL) ==\nThe output MUST have the exact same sections, in the exact same order, with the\nexact same titles as the source resume.\n\nStep 1 — Parse the source resume and identify every top-level section heading\n(e.g. \"Summary\", \"Profesional Summary\", \"Objective\", \"Education\", \"Experience\",\n\"Work History\", \"Skills\", \"Technical Skills\", \"Projects\", \"Academic Projects\",\n\"Achievements\", \"Certifications\", \"Awards\", \"Publications\", \"Languages\",\n\"Extra Curricular Activities\", \"Volunteer Work\", \"Hobbies\", etc.).\n\nStep 2 — Record the EXACT title and ORDER in \"section_order\". Preserve typos\nand unusual capitalization from the source (e.g., if the source says\n\"Profesional Summary\" with a missing S, keep it that way).\n\nStep 3 — Place each section's content into the appropriate field:\n  - Summary/Objective/Profile/About → \"summary\" field (the TEXT) and the\n    section title goes in \"section_order\"\n  - Education-like sections → \"education\" array\n  - Work/Experience-like sections → \"experience\" array\n  - Skills-like sections → \"skills\" object (use ORIGINAL category names as keys)\n  - Projects-like sections → \"projects\" array\n  - Anything else (Achievements, Awards, Activities, Languages, Publications,\n    Hobbies, Volunteer, etc.) → an entry in \"other_sections\" with the\n    original title and items.\n\nStep 4 — Use ORIGINAL section titles in section_order. If source says\n\"Professional Experience\", section_order contains \"Professional Experience\"\n(NOT \"Experience\"). If source says \"Technical Skills\", section_order contains\n\"Technical Skills\".\n\nStep 5 — Do NOT add sections that aren't in the source. If the source has no\nprojects section, don't create one. If no summary, don't add one.\n\n== ONE-PAGE BUDGET ==\n\nTHE BUDGET IS A MAXIMUM, NOT A TARGET.\n- If the source has fewer items than the maximum, KEEP ALL OF THEM. Do not invent.\n- If a source bullet is shorter than 200 chars, KEEP IT AT ITS ORIGINAL LENGTH.\n  Do not pad it. Do not add detail.\n- If skills lists are short, do not pad them — list what's there.\n- If the source resume is genuinely thin (1 job, 2 skills, no projects), the\n  output will be a thin one-page resume. That is correct behavior.\n  The fix for a thin resume is to add real experience, not invented bullets.\n\nCaps when source has MORE than the budget allows (trim toward these limits):\n- Most recent job: max 3 bullets. Older jobs: max 2 bullets.\n- Each bullet: ≤ 160 chars. Trim filler (\"end-to-end\", \"successfully\",\n  \"in order to\", \"responsible for\"), never metrics or tech names.\n- Projects: max 2, ≤ 2 bullets each.\n- Skills: cap each category at 6 items; drop items least relevant to the JD.\n- Other sections (achievements, activities, certifications): max 3 items each,\n  ≤ 100 chars per item.\n- Summary: ≤ 200 chars.\n\nWhen trimming to fit, drop content least relevant to the JD first.\n\n== TAILORING RULES ==\n- Reorder each job's bullets so JD-relevant ones come first.\n- Reorder skills within each category by JD relevance.\n- Reorder items in other_sections by JD relevance.\n- Where a bullet can be HONESTLY rephrased to include an ATS keyword, do so.\n  Prefer reordering over rewriting.\n- If the source has a summary, rewrite it to mirror the JD's priorities\n  (using only experience present in the source).\n\n== ATS SCORING OPTIMIZATION (target: ≥80/100) ==\n\nYour output will be evaluated against the JD on this exact rubric:\n\n  Skills Relevance         /20\n  Experience Alignment     /20\n  Qualifications           /20\n  Keyword Match            /20\n  Achievements and Impact  /20\n  TOTAL                    /100   (target ≥80)\n\nTo maximize each axis WITHOUT fabricating:\n\n1. SKILLS RELEVANCE — Surface JD-required skills first within each category.\n   Use the JD's exact terminology when it honestly matches a source skill.\n   Example: source has \"Sklearn\"; JD says \"Scikit-Learn\" — use \"Scikit-Learn\".\n\n2. EXPERIENCE ALIGNMENT — Lead each job's bullets with the ones most directly\n   mapped to the JD's stated responsibilities. Reorder ruthlessly. If the JD\n   emphasizes \"production ML systems\" and the source has a production-ML\n   bullet, that bullet leads.\n\n3. QUALIFICATIONS — Ensure every degree, certification, and credential from\n   the source is present. Match wording to the JD where literally accurate\n   (e.g., source \"MS in CS\" + JD \"Master's in Computer Science\" — write\n   \"Master of Science in Computer Science\" if that's how the source has it).\n\n4. KEYWORD MATCH — Identify every keyword/phrase in the JD that the source\n   resume HONESTLY supports. Weave those keywords into existing bullets using\n   the JD's exact terminology — but ONLY when the underlying work matches.\n   \n   Allowed: source says \"automated testing and deployment\", JD says \"CI/CD\n            pipelines\" — rewrite as \"built CI/CD pipelines for automated\n            testing and deployment\". Same underlying work, JD's wording.\n   \n   NOT allowed: source says \"wrote unit tests\", JD says \"Kubernetes orchestration\"\n                — cannot insert \"Kubernetes\" because the source doesn't support it.\n   \n   Never put keywords in a bare list. Always integrate them into a real bullet.\n\n5. ACHIEVEMENTS AND IMPACT — Move every bullet with a metric (%, $, count,\n   time saved) to the top of its section. Preserve every metric exactly.\n\n== HONEST CEILING ==\nIf the candidate's source resume genuinely doesn't match the JD (e.g., backend\ncandidate applying to frontend role), you cannot honestly hit 80. Produce the\nbest honest version anyway. The evaluator will flag the gap; the user can\ndecide whether to apply or look for a better-fit role.\n\n== OUTPUT SCHEMA ==\n{\n  \"name\": \"...\",\n  \"contact\": {                    // include only sub-fields actually present\n    \"phone\": \"...\", \"email\": \"...\", \"location\": \"...\",\n    \"linkedin\": \"...\", \"github\": \"...\", \"portfolio\": \"...\"\n  },\n  \"summary\": \"...\",               // OMIT if source has no summary section\n  \"section_order\": [\"<title1>\", \"<title2>\", ...],\n  \"education\":      [ { \"institution\",\"degree\",\"dates\" } ],   // OMIT if not in source\n  \"skills\":         {...},                                    // OMIT if not in source\n  \"experience\":     [ { \"company\",\"role\",\"dates\",\"bullets\":[...] } ],  // OMIT if not in source\n  \"projects\":       [ { \"name\",\"tech\":[...],\"bullets\":[...] } ],       // OMIT if not in source\n  \"other_sections\": [                                         // OMIT if no non-standard sections\n    { \"title\": \"<original title>\", \"items\": [\"...\", \"...\"] }\n  ]\n}\n\nReturn ONLY the JSON."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -1120,
+        0
+      ],
+      "id": "8e5dcb96-410a-4af0-bd79-b60b046db65a",
+      "name": "Resume Generator"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Convert this tailored resume JSON to LaTeX:\n\n{{ JSON.stringify($('Resume Generator').item.json.output) }}\n\nOnly emit sections that are present in the input JSON. Build the contact line from whichever sub-fields exist. Return ONLY the LaTeX document.",
+        "options": {
+          "systemMessage": "You are a LaTeX emitter. You convert a tailored resume JSON into a complete,\ncompilable LaTeX document.\n\n== HARD RULES ==\n1. Output ONLY raw LaTeX, starting with \\documentclass and ending with \\end{document}.\n2. No prose, no markdown, no code fences before or after the LaTeX.\n3. The output must compile cleanly on pdflatex.\n4. Apply LaTeX escaping to every string from the input JSON (see ESCAPING below).\n5. Render Summary exactly ONCE — only via the section_order loop, never as a\n   separate hardcoded block.\n\n== PREAMBLE (emit this verbatim) ==\n\n\\documentclass[letterpaper,10.5pt]{article}\n\\usepackage{latexsym}\n\\usepackage[empty]{fullpage}\n\\usepackage{titlesec}\n\\usepackage{marvosym}\n\\usepackage[usenames,dvipsnames]{color}\n\\usepackage{verbatim}\n\\usepackage{enumitem}\n\\usepackage[hidelinks]{hyperref}\n\\usepackage{fancyhdr}\n\\usepackage[english]{babel}\n\\usepackage{tabularx}\n\\input{glyphtounicode}\n\\pagestyle{fancy}\\fancyhf{}\\fancyfoot{}\n\\renewcommand{\\headrulewidth}{0pt}\n\\renewcommand{\\footrulewidth}{0pt}\n\\addtolength{\\oddsidemargin}{-0.55in}\n\\addtolength{\\evensidemargin}{-0.55in}\n\\addtolength{\\textwidth}{1.1in}\n\\addtolength{\\topmargin}{-0.6in}\n\\addtolength{\\textheight}{1.1in}\n\\urlstyle{same}\n\\raggedbottom\\raggedright\n\\setlength{\\tabcolsep}{0in}\n\\titleformat{\\section}{\\vspace{-4pt}\\scshape\\raggedright\\large}{}{0em}{}[\\color{black}\\titlerule \\vspace{-5pt}]\n\\pdfgentounicode=1\n\\newcommand{\\resumeItem}[1]{\\item\\small{{#1 \\vspace{-2pt}}}}\n\\newcommand{\\resumeSubheading}[4]{\\vspace{-2pt}\\item\\begin{tabular*}{0.97\\textwidth}[t]{l@{\\extracolsep{\\fill}}r}\\textbf{#1} & #2 \\\\ \\textit{\\small#3} & \\textit{\\small #4} \\\\ \\end{tabular*}\\vspace{-7pt}}\n\\newcommand{\\resumeProjectHeading}[2]{\\item\\begin{tabular*}{0.97\\textwidth}{l@{\\extracolsep{\\fill}}r}\\small#1 & #2 \\\\ \\end{tabular*}\\vspace{-7pt}}\n\\renewcommand\\labelitemii{$\\vcenter{\\hbox{\\tiny$\\bullet$}}$}\n\\newcommand{\\resumeSubHeadingListStart}{\\begin{itemize}[leftmargin=0.15in, label={}]}\n\\newcommand{\\resumeSubHeadingListEnd}{\\end{itemize}}\n\\newcommand{\\resumeItemListStart}{\\begin{itemize}}\n\\newcommand{\\resumeItemListEnd}{\\end{itemize}\\vspace{-5pt}}\n\n\\begin{document}\n\\fontsize{10.5}{12.6}\\selectfont\n== HEADER (emit always, immediately after \\begin{document}) ==\n\n\\begin{center}\n    \\textbf{\\Huge \\scshape <<NAME>>} \\\\ \\vspace{1pt}\n    \\small <<CONTACT_LINE>>\n\\end{center}\n\nBuild <<CONTACT_LINE>> by joining only the contact sub-fields present in\ninput.contact with \" $|$ \" separator. Use these patterns:\n  phone     → <phone>\n  email     → \\href{mailto:<e>}{\\underline{<e>}}\n  location  → <location>\n  linkedin  → \\href{<url>}{\\underline{LinkedIn}}\n  github    → \\href{<url>}{\\underline{GitHub}}\n  portfolio → \\href{<url>}{\\underline{Portfolio}}\nNever emit empty hrefs or trailing \" $|$ \".\n\n== SECTION RENDERING — FOLLOW input.section_order EXACTLY ==\n\nDo NOT emit any hardcoded \\section blocks. ALL sections come from iterating\ninput.section_order. For each title in section_order, emit ONE \\section with\nthat EXACT title (including original capitalization and any typos), then the\nmatching content. Match by keyword:\n\n  Title contains \"Summary\"/\"Profile\"/\"Objective\"/\"About\"\n    → render input.summary as a single paragraph (no itemize, no bullets)\n  Title contains \"Education\"/\"Academic Background\"/\"Studies\"\n    → render input.education with \\resumeSubheading\n  Title contains \"Experience\"/\"Employment\"/\"Work History\"/\"Professional\"\n    → render input.experience with \\resumeSubheading + bullets\n  Title contains \"Skill\"/\"Competenc\"/\"Technical\"/\"Technologies\"\n    → render input.skills as category lines\n  Title contains \"Project\"\n    → render input.projects with \\resumeProjectHeading + bullets\n  Otherwise (Achievements, Awards, Activities, Certifications, Publications,\n    Languages, Hobbies, Volunteer, etc.)\n    → find the matching entry in input.other_sections by title and render\n      its items as a simple bullet list.\n\nUse the EXACT title from section_order in the \\section{...} command. So if\nsection_order contains \"Profesional Summary\" (with the typo), output\n\\section{Profesional Summary} (preserving the typo).\n\n== RENDER PATTERNS ==\n\nSummary:\n  \\section{<title>}\n  <<SUMMARY_TEXT>>\n\nEducation:\n  \\section{<title>}\n  \\resumeSubHeadingListStart\n    \\resumeSubheading{<institution>}{<dates>}{<degree>}{}\n    ...\n  \\resumeSubHeadingListEnd\n\nSkills:\n  \\section{<title>}\n  \\begin{itemize}[leftmargin=0.15in, label={}]\n    \\small{\\item{\n      \\textbf{<cat1>}{: <items, joined by \", \">} \\\\\n      \\textbf{<cat2>}{: <items, joined by \", \">} \\\\\n      ... last line no trailing \\\\\n    }}\n  \\end{itemize}\n\nExperience:\n  \\section{<title>}\n  \\resumeSubHeadingListStart\n    \\resumeSubheading{<company>}{<dates>}{<role>}{}\n      \\resumeItemListStart\n        \\resumeItem{<bullet>}\n        ...\n      \\resumeItemListEnd\n    ...\n  \\resumeSubHeadingListEnd\n\nProjects:\n  \\section{<title>}\n  \\resumeSubHeadingListStart\n    \\resumeProjectHeading{\\textbf{<name>} $|$ \\emph{<tech, joined by \", \">}}{}\n      \\resumeItemListStart\n        \\resumeItem{<bullet>}\n        ...\n      \\resumeItemListEnd\n    ...\n  \\resumeSubHeadingListEnd\n\nOther sections (Achievements / Awards / Activities / Certifications / etc.):\n  \\section{<title>}\n  \\begin{itemize}[leftmargin=0.15in]\n    \\item <item 1>\n    \\item <item 2>\n    ...\n  \\end{itemize}\n\n== ONE-PAGE FIT — VERTICAL SPACING ==\n\nRight before \\end{document}, emit this line to absorb leftover blank space\nat the bottom so the resume looks balanced even when content is short:\n\n\\vspace*{\\fill}\n\nNever shrink fonts or margins to fit more content. If content overflows page 1,\nthe page-count verification node will catch it and retry Agent 1 with a tighter\nbudget.\n\n== LATEX ESCAPING (apply to every string from JSON before insertion) ==\n  &  →  \\&         %  →  \\%         $  →  \\$        #  →  \\#         _  →  \\_\n  ~  →  \\textasciitilde{}            ^  →  \\textasciicircum{}\n  Unicode en-dash (–) → --           Unicode em-dash (—) → ---\n  Smart quotes → straight quotes\n\nDo NOT escape { } \\ — those are part of your own LaTeX commands.\n\n== STRICT ONE-PAGE RULE ==\nThe output MUST compile to exactly one page. Never two. If you sense the\ncontent might overflow:\n- Do NOT shrink the font below 10.5pt.\n- Do NOT remove \\vspace*{\\fill}.\n- Do NOT tighten the existing \\vspace adjustments in the preamble.\nInstead, output the LaTeX as instructed and let the page-count verification\nnode trigger a retry through Agent 1 with a tighter content budget.\nYou are not responsible for fitting overlong content — that is Agent 1's job.\n\n\\end{document}\n\nReturn ONLY the LaTeX document."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -416,
+        48
+      ],
+      "id": "3f880f9d-5f10-4210-9a56-7d2e8ec5abb8",
+      "name": "LaTeX Converter"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b641019e-5c28-4de6-905a-7c484ed1fb11",
+              "leftValue": "={{ $json.evaluation.passes === true }}",
+              "rightValue": "True",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -384,
+        -560
+      ],
+      "id": "9a54d6b2-7510-4813-b934-db167d93546f",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "jsCode": "let raw = $input.first().json.output;\nraw = raw.replace(/^```(?:json)?\\s*/i, '').replace(/```\\s*$/, '').trim();\nconst evaluation = JSON.parse(raw);\n\n// Carry forward the previous data\nreturn [{\n  json: {\n    evaluation,\n    tailoredResume: $('Resume Generator').item.json.output,\n    retryCount: ($input.first().json.retryCount || 0)\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -576,
+        -560
+      ],
+      "id": "6dbf26c6-67a1-4d88-b3a0-5f5cb3035b02",
+      "name": "Parse ATS Score"
+    },
+    {
+      "parameters": {
+        "jsCode": "const retryCount = ($json.retryCount || 0) + 1;\n\nif (retryCount > 2) {\n  return [\n    {\n      json: {\n        tailoredResume: $json.tailoredResume,\n        evaluation: $json.evaluation,\n        forceProceed: true\n      }\n    }\n  ];\n}\n\nreturn [\n  {\n    json: {\n      retryCount,\n      previousScore: $json.evaluation.total,\n      feedback: ($json.evaluation.improvements || []).join('\\n- '),\n      missingKeywords: ($json.evaluation.missing_keywords || []).join(', ')\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -160,
+        -544
+      ],
+      "id": "0c161f6f-9a1e-4141-9464-db1bf6c9019c",
+      "name": "Prepare Retry"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pull the binary data of the uploaded PDF\nconst binaryKey = '_resume_pdf';  // adjust if your form field name differs\nconst pdfBase64 = $('On form submission').item.binary[binaryKey].data;\nconst pdfBuffer = Buffer.from(pdfBase64, 'base64');\n\n// Count \"/Type /Page\" occurrences in the PDF (lightweight, no dependencies)\nconst pdfText = pdfBuffer.toString('latin1');\nconst matches = pdfText.match(/\\/Type\\s*\\/Page[^s]/g) || [];\nlet pageCount = matches.length;\n\n// Fallback: try /Count entries\nif (pageCount === 0) {\n  const countMatch = pdfText.match(/\\/Count\\s+(\\d+)/);\n  if (countMatch) pageCount = parseInt(countMatch[1]);\n}\nif (pageCount === 0) pageCount = 1;  // safe default\n\n// Pass forward both the extracted text AND the target page count\nreturn [{\n  json: {\n    text: $('Extract from File').item.json.text,\n    targetPageCount: pageCount\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1312,
+        0
+      ],
+      "id": "82887470-affb-4d03-9080-6b1c5aad12b3",
+      "name": "Count Original page"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Tailored Resume (JSON):\n\"\"\"\n{{ JSON.stringify($('Resume Generator').item.json.output) }}\n\"\"\"\n\nJob Description:\n\"\"\"\n{{ $('On form submission').item.json.job_description }}\n\"\"\"\n\nScore this resume against the JD. Return ONLY the JSON.",
+        "options": {
+          "systemMessage": "You are an expert career coach and resume evaluator. You score a tailored\nresume against a job description using a strict 100-point rubric, and return\nONLY valid JSON.\n\n== RUBRIC ==\n1. Skills Relevance        (0-20): How closely do skills match the JD's required\n                                   and preferred skills? Full credit when all\n                                   required skills appear in resume.\n2. Experience Alignment    (0-20): Does work experience align with JD\n                                   responsibilities? Full credit when bullets\n                                   directly map to JD duties.\n3. Qualifications          (0-20): Are degrees, certifications, years of\n                                   experience present and matched?\n4. Keyword Match           (0-20): What fraction of JD keywords appear in the\n                                   resume? Full credit at >85% coverage.\n5. Achievements and Impact (0-20): Does the resume show quantified outcomes\n                                   (%, $, counts, time saved)?\n\n== OUTPUT (strict JSON, no prose, no code fences) ==\n{\n  \"scores\": {\n    \"skills_relevance\":        <0-20>,\n    \"experience_alignment\":    <0-20>,\n    \"qualifications\":          <0-20>,\n    \"keyword_match\":           <0-20>,\n    \"achievements_and_impact\": <0-20>\n  },\n  \"total\":   <0-100>,\n  \"passes\":  <true if total >= 80, else false>,\n  \"feedback\": \"<2-3 sentences: what's strongest>\",\n  \"improvements\": [\n    \"<specific suggestion 1>\",\n    \"<specific suggestion 2>\",\n    \"<specific suggestion 3>\"\n  ],\n  \"missing_keywords\": [\n    \"<JD keyword 1 not in resume but HONESTLY supportable by source>\",\n    \"<JD keyword 2 ...>\"\n  ]\n}\n\n== SCORING DISCIPLINE ==\n- Be strict. Default to lower scores unless evidence is clear.\n- \"missing_keywords\" must only list keywords the candidate could honestly use\n  based on their actual experience. Don't suggest keywords for skills they\n  don't have.\n- \"improvements\" should describe REORDERING and REPHRASING, never invention."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -816,
+        0
+      ],
+      "id": "4549e23a-9446-4033-bfa7-83806a6ad293",
+      "name": "ATS Evaluator."
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "claude-sonnet-4-6",
+          "cachedResultName": "Claude Sonnet 4.6"
+        },
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.5,
+      "position": [
+        -1424,
+        352
+      ],
+      "id": "86312a29-b63a-4c75-ab82-376c476e0d30",
+      "name": "Anthropic Chat Model",
+      "credentials": {
+        "anthropicApi": {
+          "id": "OsFT8fgIj9qN0PMl",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "claude-sonnet-4-6",
+          "cachedResultName": "Claude Sonnet 4.6"
+        },
+        "options": {
+          "temperature": 0
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.5,
+      "position": [
+        -1040,
+        352
+      ],
+      "id": "a2575fc5-f5ce-4519-a1cf-680d36f91d23",
+      "name": "Anthropic Chat Model1",
+      "credentials": {
+        "anthropicApi": {
+          "id": "OsFT8fgIj9qN0PMl",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "claude-sonnet-4-6",
+          "cachedResultName": "Claude Sonnet 4.6"
+        },
+        "options": {
+          "temperature": 0.1
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.5,
+      "position": [
+        -560,
+        368
+      ],
+      "id": "84c8df2f-d846-4ff3-9349-834e13cd0b5e",
+      "name": "Anthropic Chat Model2",
+      "credentials": {
+        "anthropicApi": {
+          "id": "OsFT8fgIj9qN0PMl",
+          "name": "Anthropic account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "On form submission": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Count Original page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        []
+      ]
+    },
+    "Resume Generator": {
+      "main": [
+        [
+          {
+            "node": "ATS Evaluator.",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LaTeX Converter": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "LaTeX Converter",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Retry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse ATS Score": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Retry": {
+      "main": [
+        [
+          {
+            "node": "Resume Generator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Count Original page": {
+      "main": [
+        [
+          {
+            "node": "Resume Generator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ATS Evaluator.": {
+      "main": [
+        [
+          {
+            "node": "Parse ATS Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Resume Generator",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "ATS Evaluator.",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "LaTeX Converter",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "fef351e5-5039-4a7e-adcd-853a5d2c66a8",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "fa308f89dea5e2325e8999c8b5ee4fd2b275fb5353e46a2df8e7a87ddcab1eee"
+  },
+  "id": "ejofbmsUQQF2Gzp4",
+  "tags": []
+}
