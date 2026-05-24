@@ -81,7 +81,7 @@ HTTP Request (PDF Generation)
 - HTTP API integration
 - Workflow automation using n8n
 - Local Docker-based execution
-- Groq LLM integration
+- Anthropic LLM integration
 - Conditional workflow logic
 - Automated resume generation pipeline
 
@@ -93,8 +93,8 @@ HTTP Request (PDF Generation)
 - n8n
 
 ## AI Models
-- Groq API
-- Llama 3.1 8B Instant
+- Anthropic API
+- anthropic sonnet 4.6
 
 ## Backend / Processing
 - JavaScript
@@ -109,7 +109,7 @@ HTTP Request (PDF Generation)
 - Docker Desktop
 
 ## APIs
-- Groq API
+- Anthropic API
 - LaTeX Rendering API
 
 ---
@@ -350,7 +350,7 @@ This project is created for:
 # Acknowledgements
 
 - n8n
-- Groq API
+- Anthropic API
 - Docker
 - Open-source AI community
 - LaTeX ecosystem
